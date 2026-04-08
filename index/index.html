@@ -1,1 +1,264 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>製図室ギャラリーPro (実験用)</title>
+    <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-firestore-compat.js"></script>
+    <style>
+        body { font-family: sans-serif; margin: 0; background-color: #f4f4f9; color: #333; }
+        header { background-color: #2c3e50; color: white; padding: 15px; text-align: center; }
+        .container { padding: 15px; }
+        
+        button { display: block; width: 100%; padding: 15px; margin-bottom: 15px; font-size: 16px; font-weight: bold; text-align: center; color: white; border: none; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .primary-btn { background-color: #007BFF; }
+        .warning-btn { background-color: #e74c3c; }
+        .success-btn { background-color: #2ecc71; }
+        .back-btn { background-color: #95a5a6; margin-top: 20px; }
+        .admin-btn { background-color: #34495e; font-size: 14px; padding: 10px; margin-top: 30px; }
 
+        #register-screen, #report-screen, #log-screen { display: none; }
+
+        .gallery-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 20px; }
+        .card { background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1); position: relative; }
+        .card img { width: 100%; height: 150px; object-fit: cover; display: block; }
+        .card-info { padding: 10px; font-size: 14px; }
+        .card-info b { display: block; font-size: 16px; margin-bottom: 5px; }
+        .card.lost { border: 3px solid #e74c3c; }
+        .lost-badge { background: #e74c3c; color: white; padding: 4px 8px; font-size: 12px; font-weight: bold; position: absolute; top: 0; left: 0; border-bottom-right-radius: 8px; }
+
+        .input-group { margin-bottom: 15px; }
+        .input-group label { display: block; font-weight: bold; margin-bottom: 5px; }
+        .input-group input { width: 90%; padding: 12px; border: 1px solid #ccc; border-radius: 8px; font-size: 16px; }
+        .input-group input[type="file"] { padding: 10px 0; border: none; }
+
+        /* ログ画面用のテーブルデザイン */
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; background: white; }
+        th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+        th { background-color: #ecf0f1; }
+    </style>
+</head>
+<body>
+    <header><h1>製図室ギャラリー</h1></header>
+
+    <div id="gallery-screen" class="container">
+        <button class="primary-btn" onclick="showScreen('register-screen')">📸 自分の荷物を置く</button>
+        <button class="warning-btn" onclick="showScreen('report-screen')">🚨 これ誰の？（警告する）</button>
+        
+        <h2 style="font-size: 18px; margin-top: 30px; border-bottom: 2px solid #ccc; padding-bottom: 5px;">現在の製図室</h2>
+        <div id="photo-grid" class="gallery-grid"></div>
+
+        <button class="admin-btn" onclick="openLogScreen()">📊 【実験用】行動ログを分析する</button>
+    </div>
+
+    <div id="register-screen" class="container">
+        <h2>自分の荷物を登録</h2>
+        <div class="input-group"><label>📸 写真を撮る</label><input type="file" id="reg-photo" accept="image/*" capture="environment"></div>
+        <div class="input-group"><label>👤 氏名</label><input type="text" id="reg-name" placeholder="例：建築太郎"></div>
+        <div class="input-group"><label>📍 場所</label><input type="text" id="reg-location" placeholder="例：窓際の棚"></div>
+        <button class="primary-btn" onclick="saveToCloud('normal')">登録して共有する</button>
+        <button class="back-btn" onclick="showScreen('gallery-screen')">キャンセル</button>
+    </div>
+
+    <div id="report-screen" class="container">
+        <h2 style="color: #e74c3c;">誰の荷物か警告する</h2>
+        <div class="input-group"><label>📸 写真を撮る</label><input type="file" id="lost-photo" accept="image/*" capture="environment"></div>
+        <div class="input-group"><label>📍 発見場所</label><input type="text" id="lost-location" placeholder="例：A列の床"></div>
+        <button class="warning-btn" onclick="saveToCloud('lost')">警告として投稿する</button>
+        <button class="back-btn" onclick="showScreen('gallery-screen')">キャンセル</button>
+    </div>
+
+    <div id="log-screen" class="container">
+        <h2>📊 行動履歴ログ</h2>
+        <p style="font-size: 12px; color: gray;">※いつ、誰が、何のアクションを起こしたかの記録です。</p>
+        <div id="log-table-container" style="overflow-x: auto;">
+            </div>
+        <button class="back-btn" onclick="showScreen('gallery-screen')">ギャラリーに戻る</button>
+    </div>
+
+    <script>
+        // --- あなたのFirebaseの鍵 ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyAJFvVF4aG25H-BPUbanjpUwtG7qBueC9M",
+            authDomain: "seizu-system2.firebaseapp.com",
+            projectId: "seizu-system2",
+            storageBucket: "seizu-system2.firebasestorage.app",
+            messagingSenderId: "582905535296",
+            appId: "1:582905535296:web:f23d3514bd5f36011a78a5",
+            measurementId: "G-H5FKRQNQTD"
+        };
+
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+
+        // ---------------------------------------------------
+        // ① 学生番号によるユーザーID認証
+        // ---------------------------------------------------
+        let myId = localStorage.getItem('seizu_student_id');
+        if (!myId) {
+            // アプリを初めて開いたときに学籍番号を聞く
+            myId = prompt("【初期設定】\nあなたの学生番号（または名前）を入力してください。\n※この番号であなたの荷物を識別します。");
+            if (!myId || myId.trim() === "") {
+                alert("未入力のため、一時的な匿名IDを割り当てます。");
+                myId = "匿名_" + Math.random().toString(36).substr(2, 4);
+            }
+            localStorage.setItem('seizu_student_id', myId);
+        }
+
+        function showScreen(id) {
+            ["gallery-screen", "register-screen", "report-screen", "log-screen"].forEach(s => {
+                document.getElementById(s).style.display = (s === id) ? 'block' : 'none';
+            });
+        }
+
+        // ---------------------------------------------------
+        // ② 行動を裏側で記録する関数（ロギング）
+        // ---------------------------------------------------
+        async function logAction(actionType, targetItemId = "none") {
+            try {
+                await db.collection("action_logs").add({
+                    userId: myId,              // 誰が（学生番号）
+                    action: actionType,        // 何をしたか（登録, 警告, 片付けなど）
+                    targetItemId: targetItemId,// どの荷物に対してか
+                    timestamp: firebase.firestore.FieldValue.serverTimestamp() // いつ
+                });
+            } catch (e) {
+                console.error("ログ保存エラー:", e);
+            }
+        }
+
+        async function saveToCloud(type) {
+            const prefix = type === 'normal' ? 'reg' : 'lost';
+            const file = document.getElementById(`${prefix}-photo`).files[0];
+            const loc = document.getElementById(`${prefix}-location`).value;
+            const name = type === 'normal' ? document.getElementById('reg-name').value : '持ち主不明';
+
+            if (!file || !loc || (type === 'normal' && !name)) return alert("すべて埋めてください！");
+
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                const img = new Image();
+                img.onload = async () => {
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    canvas.width = 500; canvas.height = (img.height / img.width) * 500;
+                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                    const photoData = canvas.toDataURL('image/jpeg', 0.6);
+
+                    try {
+                        // 荷物データを「アクティブ」状態で保存
+                        const docRef = await db.collection("items").add({
+                            type: type, name: name, loc: loc, photo: photoData,
+                            userId: myId,
+                            status: 'active', // ★表示・非表示のフラグ
+                            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                        });
+
+                        // ★実験用：アクションログを記録
+                        const actionName = type === 'normal' ? "自分の荷物を登録" : "他人の荷物を警告";
+                        await logAction(actionName, docRef.id);
+
+                        alert("ギャラリーに共有されました！");
+                        document.getElementById(`${prefix}-photo`).value = '';
+                        document.getElementById(`${prefix}-location`).value = '';
+                        if(type === 'normal') document.getElementById('reg-name').value = '';
+                        showScreen('gallery-screen');
+                    } catch (error) {
+                        alert("保存に失敗しました。");
+                    }
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // ギャラリーの読み込み
+        db.collection("items").orderBy("createdAt", "desc").onSnapshot((snapshot) => {
+            const grid = document.getElementById('photo-grid');
+            grid.innerHTML = '';
+            let count = 0;
+
+            snapshot.forEach((doc) => {
+                const item = doc.data();
+                // ★論理削除されている（片付け済みの）アイテムは画面に表示しない
+                if (item.status === 'deleted') return;
+                
+                count++;
+                const isMyItem = item.userId === myId;
+                const isLost = item.type === 'lost';
+                const cardClass = isLost ? 'card lost' : 'card';
+                const badgeHtml = isLost ? '<div class="lost-badge">🚨 警告/迷子</div>' : '';
+                
+                let btnHtml = '';
+                if (isMyItem) {
+                    btnHtml = `<button class="success-btn" style="padding: 10px; margin-top: 10px; margin-bottom: 0; font-size: 14px;" onclick="resolveItem('${doc.id}', '片付けた（自発的）')">✅ 片付けた</button>`;
+                } else if (isLost) {
+                    btnHtml = `<button class="warning-btn" style="padding: 10px; margin-top: 10px; margin-bottom: 0; font-size: 14px;" onclick="resolveItem('${doc.id}', '警告されて片付けた')">🙋‍♂️ これ私のです！</button>`;
+                } else {
+                    btnHtml = '<p style="color: #95a5a6; font-size: 12px; text-align: center; margin-top: 10px;">(他の人の荷物です)</p>';
+                }
+
+                grid.innerHTML += `
+                    <div class="${cardClass}">${badgeHtml}<img src="${item.photo}">
+                        <div class="card-info"><b>${item.name}</b>📍 ${item.loc}${btnHtml}</div>
+                    </div>`;
+            });
+
+            if (count === 0) {
+                grid.innerHTML = '<p style="grid-column: span 2; text-align: center; color: #7f8c8d;">現在、製図室に荷物はありません。</p>';
+            }
+        });
+
+        // ---------------------------------------------------
+        // ③ 物理削除ではなく「論理削除（隠す）」に変更
+        // ---------------------------------------------------
+        async function resolveItem(docId, actionType) {
+            if(confirm("リストから消去してよろしいですか？")) {
+                try {
+                    // データ自体は消さず、ステータスを「deleted」に更新して画面から隠すだけ
+                    await db.collection("items").doc(docId).update({
+                        status: 'deleted',
+                        resolvedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                        resolvedBy: myId
+                    });
+                    
+                    // ★実験用：アクションログを記録
+                    await logAction(actionType, docId);
+
+                } catch (error) {
+                    alert("処理に失敗しました。");
+                }
+            }
+        }
+
+        // ---------------------------------------------------
+        // ログ分析画面の表示（研究用）
+        // ---------------------------------------------------
+        function openLogScreen() {
+            showScreen('log-screen');
+            const container = document.getElementById('log-table-container');
+            container.innerHTML = '読み込み中...';
+
+            // action_logs コレクションから履歴を取得
+            db.collection("action_logs").orderBy("timestamp", "desc").limit(50).get().then((querySnapshot) => {
+                let html = `<table><tr><th>日時</th><th>学生番号</th><th>アクション</th></tr>`;
+                querySnapshot.forEach((doc) => {
+                    const data = doc.data();
+                    // 日時をフォーマット
+                    let timeStr = "取得中";
+                    if(data.timestamp) {
+                        const date = data.timestamp.toDate();
+                        timeStr = `${date.getMonth()+1}/${date.getDate()} ${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`;
+                    }
+                    html += `<tr><td>${timeStr}</td><td>${data.userId}</td><td>${data.action}</td></tr>`;
+                });
+                html += `</table>`;
+                container.innerHTML = html;
+            }).catch(error => {
+                container.innerHTML = 'ログの取得に失敗しました。門番ルールが設定されているか確認してください。';
+            });
+        }
+    </script>
+</body>
+</html>
